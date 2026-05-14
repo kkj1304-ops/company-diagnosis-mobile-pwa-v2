@@ -81,18 +81,20 @@ function fmtRatio(n?: number | null, digits = 2) {
 function Metric({ label, value, desc }: { label: string; value: string; desc: string }) {
   return (
     <div className="metric-card">
-      <div className="metric-label">{label}</div>
-      <div className="metric-value">{value}</div>
+      <span>{label}</span>
+      <strong>{value}</strong>
       <p>{desc}</p>
     </div>
   );
 }
 
-function ScoreCard({ title, value, help }: { title: string; value: string; help: string }) {
+function ScoreCard({ title, value, help, tone }: { title: string; value: string; help: string; tone?: 'risk' | 'good' | 'neutral' }) {
   return (
-    <div className="score-card">
-      <div className="score-title">{title}</div>
-      <div className="score-value">{value}</div>
+    <div className={`score-card ${tone ?? 'neutral'}`}>
+      <div className="score-top">
+        <span>{title}</span>
+        <b>{value}</b>
+      </div>
       <p>{help}</p>
     </div>
   );
@@ -165,15 +167,15 @@ export default function Home() {
   const s = result?.scores;
   const currency = m?.currency ?? '';
   const chartData = useMemo(() => result?.chart?.slice(-180) ?? [], [result]);
+  const mainPe = m ? m.forwardPE ?? m.trailingPE : null;
 
   return (
     <main className="app-shell">
       <section className="hero">
-        <div className="eyebrow">모바일 PWA · URL 접속형 기업 진단</div>
-        <h1>기업 이름만 넣고 재무·가치·위험을 한눈에</h1>
+        <div className="eyebrow">모바일 PWA · 기업 진단</div>
+        <h1>기업명만 입력하면 가치·성장·위험을 한 화면에</h1>
         <p>
-          PER, PBR 같은 어려운 지표를 쉬운 설명과 함께 보여주고 성장 가능성, 섹터 열기,
-          버블 위험, 관련 섹터 관심주 순위를 자동 계산합니다.
+          국내 종목은 DART·Yahoo·네이버 금융 fallback을 조합하고, 미국 종목은 Yahoo 데이터를 중심으로 진단합니다.
         </p>
 
         <div className="search-box">
@@ -181,14 +183,14 @@ export default function Home() {
             value={query}
             onChange={(event: any) => setQuery(event.target.value)}
             onKeyDown={(event: any) => event.key === 'Enter' && analyze()}
-            placeholder="예: 삼성전자, 하나금융지주, 005930.KS, NVDA"
+            placeholder="예: 하나금융지주, 086790.KS, 삼성전자, NVDA"
           />
           <button onClick={() => analyze()} disabled={loading}>
             {loading ? '조회중' : '진단'}
           </button>
         </div>
 
-        <div className="chips">
+        <div className="chips" aria-label="빠른 검색">
           {examples.map((example) => (
             <button
               key={example}
@@ -204,7 +206,7 @@ export default function Home() {
       </section>
 
       {deferredPrompt && (
-        <section className="notice">
+        <section className="notice compact-panel">
           <div>
             <h2>홈 화면에 앱처럼 추가</h2>
             <p>설치 버튼을 누르면 휴대폰 홈 화면에서 바로 열 수 있습니다.</p>
@@ -221,29 +223,28 @@ export default function Home() {
         </section>
       )}
 
-      {loading && <div className="loading">실시간 데이터를 가져오는 중입니다.</div>}
-      {error && <div className="error">{error}</div>}
+      {loading && <div className="loading compact-panel">실시간 데이터를 가져오는 중입니다.</div>}
+      {error && <div className="error compact-panel">{error}</div>}
 
       {result && m && s && (
         <>
           <section className="panel summary-panel">
-            <div>
+            <div className="summary-main">
               <div className="eyebrow">진단 결과</div>
               <h2>
                 {m.name} <span>({result.symbol})</span>
               </h2>
-              <p>
-                {m.sector ?? '섹터 정보 없음'} · {m.industry ?? '산업 정보 없음'} · 데이터: {result.source}
-              </p>
+              <p>{m.sector ?? '섹터 정보 없음'} · {m.industry ?? '산업 정보 없음'}</p>
             </div>
             <div className="price-box">
               <span>현재가</span>
               <strong>{fmtNumber(m.price, currency)}</strong>
+              <em>데이터: {result.source}</em>
             </div>
           </section>
 
           {result.warnings && result.warnings.length > 0 && (
-            <section className="warning-list">
+            <section className="warning-list compact-panel">
               {result.warnings.map((warning) => (
                 <p key={warning}>{warning}</p>
               ))}
@@ -251,25 +252,36 @@ export default function Home() {
           )}
 
           <section className="score-grid">
-            <ScoreCard title="성장 가능성" value={`${s.growthScore}% · ${scoreLabel(s.growthScore)}`} help="수익성, 성장성, 부채, 밸류에이션을 종합한 점수입니다." />
+            <ScoreCard title="성장 가능성" value={`${s.growthScore}% · ${scoreLabel(s.growthScore)}`} tone="good" help="수익성, 성장성, 부채, 밸류에이션을 종합했습니다." />
             <ScoreCard title="섹터 열기" value={`${s.sectorScore}% · ${scoreLabel(s.sectorScore)}`} help="업종 관심도와 주가 위치를 반영합니다." />
-            <ScoreCard title="버블 위험" value={`${s.bubbleRisk}% · ${riskLabel(s.bubbleRisk)}`} help="PER/PBR/변동성/고점 접근도를 반영합니다." />
+            <ScoreCard title="버블 위험" value={`${s.bubbleRisk}% · ${riskLabel(s.bubbleRisk)}`} tone="risk" help="PER/PBR/변동성/고점 접근도를 반영합니다." />
           </section>
 
           <section className="panel">
-            <h2>핵심 지표</h2>
+            <div className="section-head">
+              <div>
+                <div className="eyebrow">핵심 지표</div>
+                <h2>먼저 볼 숫자</h2>
+              </div>
+              <span className="section-note">부족한 값은 데이터 없음으로 표시</span>
+            </div>
             <div className="metric-grid">
-              <Metric label="PER" value={fmtRatio(m.forwardPE ?? m.trailingPE)} desc="이익 대비 가격 부담입니다." />
-              <Metric label="PBR" value={fmtRatio(m.priceToBook)} desc="장부가 대비 가격 부담입니다." />
-              <Metric label="ROE" value={fmtPct(m.returnOnEquity)} desc="자기자본 수익성입니다." />
-              <Metric label="부채비율" value={m.debtToEquity == null ? '데이터 없음' : `${m.debtToEquity.toFixed(1)}%`} desc="자본 대비 부채 부담입니다." />
-              <Metric label="매출성장률" value={fmtPct(m.revenueGrowth)} desc="외형 성장 속도입니다." />
-              <Metric label="시가총액" value={fmtNumber(m.marketCap, currency)} desc="시장의 기업가치 평가입니다." />
+              <Metric label="PER" value={fmtRatio(mainPe)} desc="이익 대비 가격 부담" />
+              <Metric label="PBR" value={fmtRatio(m.priceToBook)} desc="장부가 대비 가격 부담" />
+              <Metric label="ROE" value={fmtPct(m.returnOnEquity)} desc="자기자본 수익성" />
+              <Metric label="부채비율" value={m.debtToEquity == null ? '데이터 없음' : `${m.debtToEquity.toFixed(1)}%`} desc="자본 대비 부채 부담" />
+              <Metric label="매출성장률" value={fmtPct(m.revenueGrowth)} desc="외형 성장 속도" />
+              <Metric label="시가총액" value={fmtNumber(m.marketCap, currency)} desc="시장의 기업가치 평가" />
             </div>
           </section>
 
-          <section className="panel">
-            <h2>최근 주가 흐름</h2>
+          <section className="panel chart-panel">
+            <div className="section-head">
+              <div>
+                <div className="eyebrow">가격 흐름</div>
+                <h2>최근 주가 흐름</h2>
+              </div>
+            </div>
             {chartData.length ? (
               <div className="chart-wrap">
                 <ResponsiveContainer width="100%" height={260}>
@@ -277,7 +289,7 @@ export default function Home() {
                     <XAxis dataKey="date" minTickGap={28} tickFormatter={(value: any) => String(value).slice(5)} />
                     <YAxis domain={['auto', 'auto']} width={68} />
                     <Tooltip formatter={(value: any) => [fmtNumber(Number(value), currency), '종가']} />
-                    <Area type="monotone" dataKey="close" strokeWidth={2} fillOpacity={0.15} />
+                    <Area type="monotone" dataKey="close" strokeWidth={2} fillOpacity={0.16} />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
@@ -287,24 +299,17 @@ export default function Home() {
           </section>
 
           <section className="panel stress-panel">
-            <h2>버블 붕괴 스트레스 시나리오</h2>
+            <div className="section-head">
+              <div>
+                <div className="eyebrow">위험 점검</div>
+                <h2>스트레스 하락 시나리오</h2>
+              </div>
+            </div>
             <div className="stress-grid">
-              <Metric label="중간 스트레스" value={fmtNumber(s.stress?.moderate, currency)} desc="위험 점수 기반 가상 하락 가격입니다." />
-              <Metric label="강한 스트레스" value={fmtNumber(s.stress?.severe, currency)} desc="PER/PBR 정상화와 52주 저점을 함께 반영합니다." />
+              <Metric label="중간 스트레스" value={fmtNumber(s.stress?.moderate, currency)} desc="위험 점수 기반 가상 하락 가격" />
+              <Metric label="강한 스트레스" value={fmtNumber(s.stress?.severe, currency)} desc="PER/PBR 정상화와 52주 저점 반영" />
             </div>
-            <p>{s.stress?.explanation} 실제 미래 가격을 보장하지 않으며, 투자 판단용 보조 지표로만 사용하세요.</p>
-          </section>
-
-          <section className="panel">
-            <h2>용어 설명</h2>
-            <div className="term-grid">
-              {terms.map(([title, desc]) => (
-                <div className="term-card" key={title}>
-                  <strong>{title}</strong>
-                  <p>{desc}</p>
-                </div>
-              ))}
-            </div>
+            <p className="muted">{s.stress?.explanation} 실제 미래 가격을 보장하지 않으며, 투자 판단용 보조 지표로만 사용하세요.</p>
           </section>
 
           <section className="panel analysis-panel">
@@ -323,7 +328,7 @@ export default function Home() {
                 <div className="analysis-grid">
                   <ListBox title="긍정 포인트" items={result.analysis.positives} empty="뚜렷한 긍정 신호가 부족합니다." />
                   <ListBox title="주의 포인트" items={result.analysis.risks} empty="현재 계산값 기준 큰 위험 신호는 제한적입니다." />
-                  <ListBox title="추가 확인 체크리스트" items={result.analysis.checklist} empty="추가 확인 항목이 없습니다." />
+                  <ListBox title="추가 확인" items={result.analysis.checklist} empty="추가 확인 항목이 없습니다." />
                 </div>
                 <p className="disclaimer">{result.analysis.disclaimer}</p>
               </>
@@ -338,7 +343,7 @@ export default function Home() {
                 <div className="eyebrow">동종업계 비교</div>
                 <h2>섹터 관련 추천/관심주 순위</h2>
               </div>
-              <span>자동 점수 기준</span>
+              <span className="section-note">자동 점수 기준</span>
             </div>
             <p className="muted">
               같은 섹터 후보를 성장 가능성, 밸류에이션 부담, 버블 위험, 데이터 확보 정도로 정렬했습니다. 매수 추천이 아니라 비교 출발점입니다.
@@ -349,10 +354,12 @@ export default function Home() {
                   <article className="peer-card" key={peer.symbol}>
                     <div className="peer-rank">#{peer.rank}</div>
                     <div className="peer-main">
-                      <h3>{peer.name}</h3>
+                      <div className="peer-title-row">
+                        <h3>{peer.name}</h3>
+                        <span>{peer.score}점</span>
+                      </div>
                       <p>{peer.symbol} · {peer.reason}</p>
                       <div className="peer-metrics">
-                        <span>추천점수 {peer.score}</span>
                         <span>성장 {peer.growthScore}%</span>
                         <span>버블 {peer.bubbleRisk}%</span>
                         <span>PER {fmtRatio(peer.forwardPE ?? peer.trailingPE, 1)}</span>
@@ -367,7 +374,7 @@ export default function Home() {
                           analyze(peer.symbol);
                         }}
                       >
-                        이 종목 진단
+                        진단
                       </button>
                     </div>
                   </article>
@@ -377,6 +384,23 @@ export default function Home() {
               <p>현재 섹터 비교 후보를 충분히 불러오지 못했습니다.</p>
             )}
           </section>
+
+          <section className="panel terms-panel">
+            <div className="section-head">
+              <div>
+                <div className="eyebrow">참고</div>
+                <h2>용어 설명</h2>
+              </div>
+            </div>
+            <div className="term-grid">
+              {terms.map(([title, desc]) => (
+                <div className="term-card" key={title}>
+                  <strong>{title}</strong>
+                  <p>{desc}</p>
+                </div>
+              ))}
+            </div>
+          </section>
         </>
       )}
 
@@ -385,29 +409,28 @@ export default function Home() {
           min-height: 100vh;
           max-width: 1040px;
           margin: 0 auto;
-          padding: 28px 16px 80px;
+          padding: 22px 14px 72px;
           color: #172033;
+          background: #f6f8fb;
         }
         .hero,
         .panel,
-        .notice,
-        .loading,
-        .error,
-        .warning-list {
-          border: 1px solid #e5e9f2;
+        .compact-panel,
+        .score-card {
+          border: 1px solid #e1e7f0;
           border-radius: 24px;
           background: #ffffff;
-          box-shadow: 0 12px 36px rgba(19, 35, 66, 0.08);
+          box-shadow: 0 10px 30px rgba(19, 35, 66, 0.07);
         }
         .hero {
-          padding: 28px;
-          background: linear-gradient(135deg, #eef4ff, #ffffff 54%, #f6fbf8);
+          padding: 26px;
+          background: linear-gradient(135deg, #edf4ff, #ffffff 58%, #f5fbf7);
         }
         .eyebrow {
-          font-size: 13px;
-          font-weight: 800;
-          color: #486284;
-          letter-spacing: 0.04em;
+          font-size: 12px;
+          font-weight: 900;
+          color: #506785;
+          letter-spacing: 0.06em;
           text-transform: uppercase;
         }
         h1,
@@ -418,14 +441,31 @@ export default function Home() {
         }
         h1 {
           margin-top: 10px;
-          font-size: clamp(32px, 8vw, 56px);
-          line-height: 1.05;
-          letter-spacing: -0.05em;
+          max-width: 760px;
+          font-size: clamp(30px, 7vw, 54px);
+          line-height: 1.06;
+          letter-spacing: -0.055em;
+        }
+        h2 {
+          letter-spacing: -0.035em;
+        }
+        .hero p,
+        .muted,
+        .disclaimer,
+        .panel > p,
+        .list-box p,
+        .term-card p,
+        .metric-card p,
+        .score-card p,
+        .peer-main p,
+        .price-box em,
+        .summary-main p {
+          color: #66758b;
+          line-height: 1.62;
         }
         .hero p {
-          margin-top: 16px;
-          color: #59677e;
-          line-height: 1.65;
+          margin-top: 14px;
+          max-width: 720px;
         }
         .search-box {
           display: flex;
@@ -439,7 +479,7 @@ export default function Home() {
         input {
           flex: 1;
           min-width: 0;
-          border: 1px solid #d7dfeb;
+          border: 1px solid #d4deeb;
           border-radius: 16px;
           padding: 15px 16px;
           background: #ffffff;
@@ -456,7 +496,7 @@ export default function Home() {
           padding: 14px 18px;
           background: #172033;
           color: #ffffff;
-          font-weight: 800;
+          font-weight: 900;
           cursor: pointer;
         }
         button:disabled {
@@ -471,18 +511,15 @@ export default function Home() {
         }
         .chips button,
         .peer-side button {
-          background: #f0f4f9;
+          background: #eef3f8;
           color: #26364f;
           padding: 9px 12px;
           border-radius: 999px;
           font-size: 13px;
         }
-        .notice,
-        .loading,
-        .error,
-        .warning-list,
+        .compact-panel,
         .panel {
-          margin-top: 18px;
+          margin-top: 16px;
           padding: 22px;
         }
         .notice {
@@ -490,18 +527,6 @@ export default function Home() {
           align-items: center;
           justify-content: space-between;
           gap: 14px;
-        }
-        .notice p,
-        .muted,
-        .disclaimer,
-        .panel > p,
-        .list-box p,
-        .term-card p,
-        .metric-card p,
-        .score-card p,
-        .peer-main p {
-          color: #66758b;
-          line-height: 1.6;
         }
         .error {
           background: #fff4f2;
@@ -527,41 +552,73 @@ export default function Home() {
         }
         .summary-panel h2 {
           margin-top: 6px;
-          font-size: 28px;
-          letter-spacing: -0.04em;
+          font-size: 29px;
         }
         .summary-panel h2 span {
           color: #728096;
           font-size: 18px;
         }
         .price-box {
-          min-width: 190px;
+          min-width: 210px;
           padding: 16px;
           border-radius: 18px;
-          background: #f5f7fb;
+          background: #f4f7fb;
           text-align: right;
         }
-        .price-box span {
+        .price-box span,
+        .metric-card span,
+        .section-note {
           display: block;
           color: #66758b;
           font-size: 13px;
+          font-weight: 800;
         }
         .price-box strong {
           display: block;
-          margin-top: 4px;
-          font-size: 22px;
+          margin-top: 3px;
+          font-size: 24px;
+          letter-spacing: -0.03em;
         }
-        .score-grid,
+        .price-box em {
+          display: block;
+          margin-top: 4px;
+          font-size: 12px;
+          font-style: normal;
+        }
+        .score-grid {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 12px;
+          margin-top: 16px;
+        }
+        .score-card {
+          padding: 18px;
+        }
+        .score-card.good {
+          background: linear-gradient(180deg, #ffffff, #f6fbf8);
+        }
+        .score-card.risk {
+          background: linear-gradient(180deg, #ffffff, #fff8f5);
+        }
+        .score-top span {
+          display: block;
+          color: #66758b;
+          font-size: 13px;
+          font-weight: 900;
+        }
+        .score-top b {
+          display: block;
+          margin-top: 7px;
+          font-size: 23px;
+          letter-spacing: -0.035em;
+        }
         .metric-grid,
         .term-grid,
         .analysis-grid,
         .stress-grid {
           display: grid;
           gap: 12px;
-          margin-top: 18px;
-        }
-        .score-grid {
-          grid-template-columns: repeat(3, 1fr);
+          margin-top: 16px;
         }
         .metric-grid,
         .term-grid {
@@ -573,34 +630,27 @@ export default function Home() {
         .stress-grid {
           grid-template-columns: repeat(2, 1fr);
         }
-        .score-card,
         .metric-card,
         .term-card,
         .list-box,
         .analysis-summary,
         .peer-card {
-          border: 1px solid #e5e9f2;
+          border: 1px solid #e4eaf2;
           border-radius: 18px;
           background: #fbfcff;
           padding: 16px;
         }
-        .score-title,
-        .metric-label {
-          color: #66758b;
-          font-size: 13px;
-          font-weight: 800;
-        }
-        .score-value,
-        .metric-value {
-          margin-top: 7px;
-          font-size: 24px;
-          font-weight: 900;
-          letter-spacing: -0.03em;
+        .metric-card strong {
+          display: block;
+          margin-top: 6px;
+          font-size: 23px;
+          letter-spacing: -0.035em;
         }
         .chart-wrap {
           margin-top: 12px;
           width: 100%;
           height: 280px;
+          overflow: hidden;
         }
         .analysis-summary {
           margin-top: 16px;
@@ -611,6 +661,7 @@ export default function Home() {
         .peer-main h3 {
           margin-bottom: 8px;
           font-size: 18px;
+          letter-spacing: -0.02em;
         }
         ul {
           margin: 0;
@@ -632,7 +683,7 @@ export default function Home() {
         }
         .peer-card {
           display: grid;
-          grid-template-columns: 54px 1fr auto;
+          grid-template-columns: 52px minmax(0, 1fr) auto;
           align-items: center;
           gap: 14px;
         }
@@ -644,6 +695,21 @@ export default function Home() {
           border-radius: 14px;
           background: #172033;
           color: #ffffff;
+          font-weight: 900;
+        }
+        .peer-title-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 10px;
+        }
+        .peer-title-row span {
+          flex: 0 0 auto;
+          border-radius: 999px;
+          background: #e9f1ff;
+          color: #253a60;
+          padding: 5px 9px;
+          font-size: 12px;
           font-weight: 900;
         }
         .peer-metrics {
@@ -658,7 +724,7 @@ export default function Home() {
           background: #eef2f7;
           color: #43526a;
           font-size: 12px;
-          font-weight: 700;
+          font-weight: 800;
         }
         .peer-side {
           text-align: right;
@@ -666,13 +732,29 @@ export default function Home() {
         .peer-side strong {
           display: block;
           margin-bottom: 10px;
+          white-space: nowrap;
+        }
+        .terms-panel {
+          margin-top: 22px;
+          opacity: 0.96;
         }
         @media (max-width: 760px) {
+          .app-shell {
+            padding: 16px 10px 56px;
+          }
+          .hero,
+          .panel,
+          .compact-panel {
+            border-radius: 20px;
+            padding: 18px;
+          }
           .search-box,
           .notice,
           .summary-panel,
-          .section-head {
+          .section-head,
+          .peer-title-row {
             flex-direction: column;
+            align-items: stretch;
           }
           .search-box button,
           .notice button {
@@ -680,6 +762,7 @@ export default function Home() {
           }
           .price-box {
             width: 100%;
+            min-width: 0;
             text-align: left;
           }
           .score-grid,
@@ -689,11 +772,36 @@ export default function Home() {
           .stress-grid {
             grid-template-columns: 1fr;
           }
+          .score-card,
+          .metric-card,
+          .term-card,
+          .list-box,
+          .analysis-summary,
+          .peer-card {
+            border-radius: 16px;
+          }
           .peer-card {
             grid-template-columns: 1fr;
           }
+          .peer-rank {
+            width: auto;
+            height: auto;
+            display: inline-flex;
+            justify-content: center;
+            padding: 8px 12px;
+          }
           .peer-side {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
             text-align: left;
+          }
+          .peer-side strong {
+            margin-bottom: 0;
+          }
+          .peer-side button {
+            min-width: 76px;
           }
         }
       `}</style>
