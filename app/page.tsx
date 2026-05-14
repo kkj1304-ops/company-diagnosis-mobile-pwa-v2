@@ -11,7 +11,7 @@ type VisitStats = {
   totalVisits: number | null;
   uniqueVisitors: number | null;
   message?: string;
-
+};
 type CompanyAnalysis = {
   headline: string;
   summary: string;
