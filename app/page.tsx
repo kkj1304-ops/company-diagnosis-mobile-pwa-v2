@@ -171,6 +171,7 @@ export default function Home() {
 
   return (
     <main className="app-shell">
+      <div className="developer-credit">개발자 : 지모바</div>
       <section className="hero">
         <div className="eyebrow">모바일 PWA · 기업 진단</div>
         <h1>기업명만 입력하면 가치·성장·위험을 한 화면에</h1>
