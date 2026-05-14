@@ -88,6 +88,77 @@ type DartResolveResult = {
 
 let dartXmlCache: Promise<string> | null = null;
 
+
+const DIRECT_TICKER_ALIASES: Record<string, string> = {
+  '삼성전자': '005930.KS',
+  '삼전': '005930.KS',
+  'SK하이닉스': '000660.KS',
+  '에스케이하이닉스': '000660.KS',
+  '하이닉스': '000660.KS',
+  '현대차': '005380.KS',
+  '현대자동차': '005380.KS',
+  '기아': '000270.KS',
+  'NAVER': '035420.KS',
+  '네이버': '035420.KS',
+  '카카오': '035720.KS',
+  '두산에너빌리티': '034020.KS',
+  '두산중공업': '034020.KS',
+  '두산에너': '034020.KS',
+  '에코프로비엠': '247540.KQ',
+  '에코프로': '086520.KQ',
+  'LG에너지솔루션': '373220.KS',
+  '엘지에너지솔루션': '373220.KS',
+  '삼성SDI': '006400.KS',
+  'LG화학': '051910.KS',
+  'POSCO홀딩스': '005490.KS',
+  '포스코홀딩스': '005490.KS',
+  '포스코퓨처엠': '003670.KS',
+
+  // 금융/은행: DART 또는 lib/tickers.ts가 빠져 있어도 직접 해석되도록 둡니다.
+  'KB금융': '105560.KS',
+  'KB금융지주': '105560.KS',
+  '케이비금융': '105560.KS',
+  '신한지주': '055550.KS',
+  '신한금융지주': '055550.KS',
+  '신한금융': '055550.KS',
+  '하나금융지주': '086790.KS',
+  '하나금융': '086790.KS',
+  '하나금융그룹': '086790.KS',
+  '하나지주': '086790.KS',
+  'HANA FINANCIAL': '086790.KS',
+  'HANA FINANCIAL GROUP': '086790.KS',
+  'HANAFINANCIAL': '086790.KS',
+  'HANAFINANCIALGROUP': '086790.KS',
+  '우리금융지주': '316140.KS',
+  '우리금융': '316140.KS',
+  '기업은행': '024110.KS',
+  'IBK기업은행': '024110.KS',
+  '메리츠금융지주': '138040.KS',
+  '한국금융지주': '071050.KS',
+  '미래에셋증권': '006800.KS',
+  'NH투자증권': '005940.KS',
+  '카카오뱅크': '323410.KS',
+};
+
+const NORMALIZED_DIRECT_TICKER_ALIASES: Record<string, string> = Object.fromEntries(
+  Object.entries(DIRECT_TICKER_ALIASES).map(([name, symbol]) => [normalizeName(name), symbol]),
+);
+
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values.filter(Boolean)));
+}
+
+function directCandidatesFromInput(input: string): string[] {
+  const trimmed = input.trim();
+  const normalized = normalizeName(trimmed);
+  const direct =
+    DIRECT_TICKER_ALIASES[trimmed] ??
+    DIRECT_TICKER_ALIASES[trimmed.toUpperCase()] ??
+    NORMALIZED_DIRECT_TICKER_ALIASES[normalized];
+
+  return direct ? [direct] : [];
+}
+
 function cleanTicker(input: string): string {
   return input.trim().toUpperCase();
 }
@@ -271,15 +342,29 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function fetchJson(url: string): Promise<any> {
-  const response = await fetch(url, {
-    cache: 'no-store',
-    headers: {
-      Accept: 'application/json,text/plain,*/*',
-      'User-Agent':
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36',
-    },
-  });
+const FETCH_HEADERS = {
+  Accept: 'application/json,text/plain,*/*',
+  'User-Agent':
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36',
+};
+
+async function fetchWithTimeout(url: string, timeoutMs = 4500): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, {
+      cache: 'no-store',
+      headers: FETCH_HEADERS,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchJson(url: string, timeoutMs = 4500): Promise<any> {
+  const response = await fetchWithTimeout(url, timeoutMs);
 
   if (!response.ok) {
     throw new Error(`${response.status} ${response.statusText}`.trim());
@@ -288,16 +373,8 @@ async function fetchJson(url: string): Promise<any> {
   return response.json();
 }
 
-
-async function fetchText(url: string): Promise<string> {
-  const response = await fetch(url, {
-    cache: 'no-store',
-    headers: {
-      Accept: 'application/json,text/plain,*/*',
-      'User-Agent':
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36',
-    },
-  });
+async function fetchText(url: string, timeoutMs = 4500): Promise<string> {
+  const response = await fetchWithTimeout(url, timeoutMs);
 
   if (!response.ok) {
     throw new Error(`${response.status} ${response.statusText}`.trim());
@@ -708,7 +785,9 @@ async function resolveCandidates(input: string): Promise<DartResolveResult> {
     throw new Error('기업명 또는 티커를 입력해 주세요.');
   }
 
-  const localCandidates = candidatesFromInput(raw);
+  const directCandidates = directCandidatesFromInput(raw);
+  const libraryCandidates = candidatesFromInput(raw);
+  const localCandidates = uniqueStrings([...directCandidates, ...libraryCandidates]);
   const firstLocal = localCandidates[0];
 
   if (/^\d{6}$/.test(raw) || /^\d{6}\.(KS|KQ)$/i.test(raw)) {
@@ -722,17 +801,18 @@ async function resolveCandidates(input: string): Promise<DartResolveResult> {
   const localResolved = firstLocal && /^\d{6}\.(KS|KQ)$/i.test(firstLocal);
 
   if (localResolved) {
-    return { candidates: localCandidates, status: 'not needed' };
+    return { candidates: localCandidates, status: directCandidates.length ? 'resolved by built-in alias' : 'not needed' };
   }
 
   const dartResult = await resolveFromDart(raw);
 
   if (dartResult.candidates.length > 0) {
-    return dartResult;
+    return { candidates: uniqueStrings([...dartResult.candidates, ...localCandidates]), status: dartResult.status };
   }
 
   return {
-    candidates: localCandidates.length ? localCandidates : [raw],
+    // 한글 기업명을 그대로 Yahoo에 던지면 실패가 길어지므로, 검증된 후보가 없으면 빈 목록을 반환합니다.
+    candidates: localCandidates.filter((candidate) => /^\d{6}\.(KS|KQ)$/i.test(candidate)),
     status: dartResult.status,
   };
 }
@@ -1118,10 +1198,10 @@ async function buildPeerRecommendations(
   const groupKey = peerGroupKey(query, metrics.symbol, metrics);
   const seeds = (PEER_GROUPS[groupKey] ?? PEER_GROUPS[isKoreanSymbol(metrics.symbol) ? 'kr-large' : 'us-large'])
     .filter((seed) => !sameSymbol(seed.symbol, metrics.symbol))
-    .slice(0, 6);
+    .slice(0, 5);
 
   const settled = await Promise.allSettled(
-    seeds.map((seed) => withTimeout(fetchPeerRecommendation(seed), 5500, seed.symbol)),
+    seeds.map((seed) => withTimeout(fetchPeerRecommendation(seed), 3200, seed.symbol)),
   );
 
   return settled
@@ -1222,8 +1302,10 @@ async function buildReport(query: string, symbol: string, dartStatus: string): P
     dart: dartStatus,
   };
 
-  let chartData: ChartData;
+  let chartData: ChartData | null = null;
   const naverCode = naverCodeFromSymbol(symbol);
+  let naverBasicData: QuoteData = {};
+  let naverIntegrationData: QuoteData = {};
 
   try {
     chartData = await fetchYahooChart(symbol);
@@ -1231,16 +1313,36 @@ async function buildReport(query: string, symbol: string, dartStatus: string): P
   } catch (error) {
     sourceStatus.yahooChart = `failed: ${errorMessage(error)}`;
 
-    if (!naverCode) {
-      throw error;
+    if (naverCode) {
+      try {
+        chartData = await fetchNaverChart(naverCode);
+        sourceStatus.naverChart = 'ok';
+        warnings.push('Yahoo chart 조회 실패로 네이버 금융 차트 데이터를 사용했습니다.');
+      } catch (naverError) {
+        sourceStatus.naverChart = `failed: ${errorMessage(naverError)}`;
+
+        try {
+          naverBasicData = await fetchNaverBasic(naverCode);
+          sourceStatus.naverBasic = 'ok';
+
+          if (naverBasicData.price !== undefined && naverBasicData.price !== null) {
+            const today = new Date().toISOString().slice(0, 10);
+            chartData = {
+              chart: [{ date: today, close: naverBasicData.price }],
+              price: naverBasicData.price,
+              currency: 'KRW',
+              fiftyTwoWeekHigh: naverBasicData.price,
+              fiftyTwoWeekLow: naverBasicData.price,
+            };
+            warnings.push('차트 조회가 불안정해 네이버 현재가 기준으로 임시 차트를 표시합니다.');
+          }
+        } catch (basicError) {
+          sourceStatus.naverBasic = `failed: ${errorMessage(basicError)}`;
+        }
+      }
     }
 
-    try {
-      chartData = await fetchNaverChart(naverCode);
-      sourceStatus.naverChart = 'ok';
-      warnings.push('Yahoo chart 조회 실패로 네이버 금융 차트 데이터를 사용했습니다.');
-    } catch (naverError) {
-      sourceStatus.naverChart = `failed: ${errorMessage(naverError)}`;
+    if (!chartData) {
       throw error;
     }
   }
@@ -1265,15 +1367,14 @@ async function buildReport(query: string, symbol: string, dartStatus: string): P
     warnings.push('Yahoo summary API가 실패했지만 앱은 가격/차트 데이터로 계속 동작합니다.');
   }
 
-  let naverBasicData: QuoteData = {};
-  let naverIntegrationData: QuoteData = {};
-
   if (naverCode) {
-    try {
-      naverBasicData = await fetchNaverBasic(naverCode);
-      sourceStatus.naverBasic = 'ok';
-    } catch (error) {
-      sourceStatus.naverBasic = `failed: ${errorMessage(error)}`;
+    if (sourceStatus.naverBasic !== 'ok') {
+      try {
+        naverBasicData = await fetchNaverBasic(naverCode);
+        sourceStatus.naverBasic = 'ok';
+      } catch (error) {
+        sourceStatus.naverBasic = `failed: ${errorMessage(error)}`;
+      }
     }
 
     try {
@@ -1311,7 +1412,13 @@ async function buildReport(query: string, symbol: string, dartStatus: string): P
 
   const scores = scoreFromMetrics(metrics);
   const analysis = buildCompanyAnalysis(metrics, scores, chartData.chart, warnings);
-  const peers = await buildPeerRecommendations(query, metrics);
+  let peers: PeerRecommendation[] = [];
+
+  try {
+    peers = await buildPeerRecommendations(query, metrics);
+  } catch (error) {
+    warnings.push(`섹터 관련 종목 순위 계산에 실패했습니다: ${errorMessage(error)}`);
+  }
 
   return {
     query,
