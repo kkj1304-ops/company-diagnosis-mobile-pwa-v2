@@ -1,8 +1,10 @@
+import AdmZip from 'adm-zip';
 import { NextResponse } from 'next/server';
-import { normalizeTicker } from '@/lib/tickers';
+import { candidatesFromInput, normalizeName } from '@/lib/tickers';
 import { scoreFromMetrics, type RawMetrics } from '@/lib/scoring';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 const modules = [
   'price',
@@ -13,16 +15,21 @@ const modules = [
   'recommendationTrend'
 ].join(',');
 
-function val(obj: any, key: string) {
-  return obj?.[key]?.raw ?? obj?.[key] ?? null;
+type DartCorp = { corpName: string; stockCode: string };
+let dartCache: { at: number; items: DartCorp[] } | null = null;
+
+function textBetween(block: string, tag: string) {
+  const m = block.match(new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`));
+  return (m?.[1] ?? '').trim();
 }
 
-function pickSummary(raw: any): Partial<RawMetrics> {
-  const price = raw.price ?? {};
-  const profile = raw.summaryProfile ?? {};
-  const detail = raw.summaryDetail ?? {};
-  const stats = raw.defaultKeyStatistics ?? {};
-  const fin = raw.financialData ?? {};
+function pick(raw: any): RawMetrics {
+  const price = raw?.price ?? {};
+  const profile = raw?.summaryProfile ?? {};
+  const detail = raw?.summaryDetail ?? {};
+  const stats = raw?.defaultKeyStatistics ?? {};
+  const fin = raw?.financialData ?? {};
+  const val = (obj: any, key: string) => obj?.[key]?.raw ?? obj?.[key] ?? null;
   return {
     symbol: price.symbol ?? '',
     name: price.longName ?? price.shortName ?? price.symbol ?? 'Unknown',
@@ -49,38 +56,18 @@ function pickSummary(raw: any): Partial<RawMetrics> {
   };
 }
 
-function pickQuote(q: any): Partial<RawMetrics> {
+function metricsFromChart(symbol: string, chart: Array<{ date: string; close: number }>, requestedName?: string): RawMetrics {
+  const closes = chart.map((x) => x.close).filter((x) => x != null && isFinite(x));
+  const last = closes.at(-1) ?? null;
+  const high = closes.length ? Math.max(...closes) : null;
+  const low = closes.length ? Math.min(...closes) : null;
   return {
-    symbol: q.symbol ?? '',
-    name: q.longName ?? q.shortName ?? q.displayName ?? q.symbol ?? 'Unknown',
-    sector: q.sector ?? null,
-    industry: q.industry ?? null,
-    currency: q.currency ?? '',
-    price: q.regularMarketPrice ?? q.postMarketPrice ?? q.preMarketPrice ?? null,
-    marketCap: q.marketCap ?? null,
-    trailingPE: q.trailingPE ?? null,
-    forwardPE: q.forwardPE ?? null,
-    priceToBook: q.priceToBook ?? null,
-    returnOnEquity: q.returnOnEquity ?? null,
-    debtToEquity: q.debtToEquity ?? null,
-    revenueGrowth: q.revenueGrowth ?? null,
-    earningsGrowth: q.earningsGrowth ?? null,
-    dividendYield: q.dividendYield ?? q.trailingAnnualDividendYield ?? null,
-    beta: q.beta ?? q.beta3Year ?? null,
-    fiftyTwoWeekHigh: q.fiftyTwoWeekHigh ?? null,
-    fiftyTwoWeekLow: q.fiftyTwoWeekLow ?? null,
-    targetMeanPrice: q.targetMeanPrice ?? null
-  };
-}
-
-function mergeMetrics(symbol: string, ...parts: Array<Partial<RawMetrics> | null | undefined>): RawMetrics {
-  const merged: any = {
     symbol,
-    name: symbol,
+    name: requestedName || symbol,
     sector: null,
     industry: null,
-    currency: '',
-    price: null,
+    currency: symbol.endsWith('.KS') || symbol.endsWith('.KQ') ? 'KRW' : '',
+    price: last,
     marketCap: null,
     trailingPE: null,
     forwardPE: null,
@@ -93,19 +80,49 @@ function mergeMetrics(symbol: string, ...parts: Array<Partial<RawMetrics> | null
     profitMargins: null,
     dividendYield: null,
     beta: null,
-    fiftyTwoWeekHigh: null,
-    fiftyTwoWeekLow: null,
+    fiftyTwoWeekHigh: high,
+    fiftyTwoWeekLow: low,
     recommendationKey: null,
     targetMeanPrice: null
   };
-  for (const p of parts) {
-    if (!p) continue;
-    for (const [k, v] of Object.entries(p)) {
-      if (v !== null && v !== undefined && v !== '') merged[k] = v;
-    }
+}
+
+async function fetchDartCorps(): Promise<DartCorp[]> {
+  const apiKey = process.env.DART_API_KEY;
+  if (!apiKey) return [];
+
+  const oneDay = 24 * 60 * 60 * 1000;
+  if (dartCache && Date.now() - dartCache.at < oneDay) return dartCache.items;
+
+  const url = `https://opendart.fss.or.kr/api/corpCode.xml?crtfc_key=${encodeURIComponent(apiKey)}`;
+  const res = await fetch(url, { cache: 'no-store' });
+  if (!res.ok) return [];
+
+  const zip = new AdmZip(Buffer.from(await res.arrayBuffer()));
+  const entry = zip.getEntry('CORPCODE.xml') ?? zip.getEntries()[0];
+  const xml = entry?.getData().toString('utf8') ?? '';
+
+  const items: DartCorp[] = [];
+  const blocks = xml.match(/<list>[\s\S]*?<\/list>/g) ?? [];
+  for (const block of blocks) {
+    const corpName = textBetween(block, 'corp_name');
+    const stockCode = textBetween(block, 'stock_code');
+    if (corpName && /^\d{6}$/.test(stockCode)) items.push({ corpName, stockCode });
   }
-  merged.symbol = merged.symbol || symbol;
-  return merged as RawMetrics;
+
+  dartCache = { at: Date.now(), items };
+  return items;
+}
+
+async function candidatesFromDart(query: string): Promise<string[]> {
+  const corps = await fetchDartCorps();
+  if (!corps.length) return [];
+
+  const q = normalizeName(query);
+  const exact = corps.find((x) => normalizeName(x.corpName) === q);
+  const partial = exact ? null : corps.find((x) => normalizeName(x.corpName).includes(q) || q.includes(normalizeName(x.corpName)));
+  const hit = exact ?? partial;
+  return hit ? [`${hit.stockCode}.KS`, `${hit.stockCode}.KQ`] : [];
 }
 
 async function fetchYahooSummary(symbol: string) {
@@ -113,68 +130,40 @@ async function fetchYahooSummary(symbol: string) {
   const res = await fetch(url, {
     cache: 'no-store',
     headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 company-diagnosis-pwa',
-      'Accept': 'application/json'
+      'User-Agent': 'Mozilla/5.0 company-diagnosis-pwa',
+      Accept: 'application/json'
     }
   });
-  if (!res.ok) throw new Error(`Yahoo summary failed: ${res.status}`);
+  if (!res.ok) return null;
   const json = await res.json();
-  const result = json?.quoteSummary?.result?.[0];
-  const err = json?.quoteSummary?.error;
-  if (!result || err) throw new Error(err?.description ?? 'summary 데이터가 비어 있습니다.');
-  return pickSummary(result);
-}
-
-async function fetchYahooQuote(symbol: string) {
-  const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbol)}`;
-  const res = await fetch(url, {
-    cache: 'no-store',
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 company-diagnosis-pwa',
-      'Accept': 'application/json'
-    }
-  });
-  if (!res.ok) throw new Error(`Yahoo quote failed: ${res.status}`);
-  const json = await res.json();
-  const result = json?.quoteResponse?.result?.[0];
-  if (!result) throw new Error('quote 데이터가 비어 있습니다.');
-  return pickQuote(result);
+  return json?.quoteSummary?.result?.[0] ?? null;
 }
 
 async function fetchChart(symbol: string) {
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1y&interval=1d`;
-  const res = await fetch(url, {
-    cache: 'no-store',
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 company-diagnosis-pwa',
-      'Accept': 'application/json'
-    }
-  });
-  if (!res.ok) throw new Error(`Yahoo chart failed: ${res.status}`);
+  const res = await fetch(url, { cache: 'no-store', headers: { 'User-Agent': 'Mozilla/5.0 company-diagnosis-pwa' } });
+  if (!res.ok) return [];
   const json = await res.json();
   const r = json?.chart?.result?.[0];
-  const meta = r?.meta ?? {};
   const timestamps = r?.timestamp ?? [];
-  const quote = r?.indicators?.quote?.[0] ?? {};
-  const closes = quote.close ?? [];
-  const highs = quote.high ?? [];
-  const lows = quote.low ?? [];
-  const chart = timestamps.map((t: number, i: number) => ({
+  const closes = r?.indicators?.quote?.[0]?.close ?? [];
+  return timestamps.map((t: number, i: number) => ({
     date: new Date(t * 1000).toISOString().slice(0, 10),
     close: closes[i]
   })).filter((x: any) => x.close != null);
-  const validHighs = highs.filter((x: any) => typeof x === 'number' && isFinite(x));
-  const validLows = lows.filter((x: any) => typeof x === 'number' && isFinite(x));
-  const last = chart.length ? chart[chart.length - 1].close : null;
-  const metrics: Partial<RawMetrics> = {
-    symbol: meta.symbol ?? symbol,
-    name: meta.longName ?? meta.shortName ?? meta.symbol ?? symbol,
-    currency: meta.currency ?? '',
-    price: meta.regularMarketPrice ?? last,
-    fiftyTwoWeekHigh: meta.fiftyTwoWeekHigh ?? (validHighs.length ? Math.max(...validHighs) : null),
-    fiftyTwoWeekLow: meta.fiftyTwoWeekLow ?? (validLows.length ? Math.min(...validLows) : null)
-  };
-  return { chart, metrics };
+}
+
+async function resolveWorkingSymbol(query: string) {
+  const seen = new Set<string>();
+  const candidates = [...candidatesFromInput(query), ...(await candidatesFromDart(query))]
+    .map((x) => x.toUpperCase())
+    .filter((x) => !seen.has(x) && seen.add(x));
+
+  for (const symbol of candidates) {
+    const chart = await fetchChart(symbol);
+    if (chart.length) return { symbol, chart };
+  }
+  return { symbol: candidates[0] ?? query.toUpperCase(), chart: [] as Array<{ date: string; close: number }> };
 }
 
 export async function POST(req: Request) {
@@ -183,52 +172,24 @@ export async function POST(req: Request) {
     const query = String(body?.query ?? '').trim();
     if (!query) return NextResponse.json({ error: '기업명이나 티커를 입력하세요.' }, { status: 400 });
 
-    const symbol = normalizeTicker(query);
-    const [chartResult, quoteResult, summaryResult] = await Promise.allSettled([
-      fetchChart(symbol),
-      fetchYahooQuote(symbol),
-      fetchYahooSummary(symbol)
-    ]);
-
-    const chart = chartResult.status === 'fulfilled' ? chartResult.value.chart : [];
-    const chartMetrics = chartResult.status === 'fulfilled' ? chartResult.value.metrics : null;
-    const quoteMetrics = quoteResult.status === 'fulfilled' ? quoteResult.value : null;
-    const summaryMetrics = summaryResult.status === 'fulfilled' ? summaryResult.value : null;
-
-    const metrics = mergeMetrics(symbol, chartMetrics, quoteMetrics, summaryMetrics);
-    if (!metrics.price && chart.length) metrics.price = chart[chart.length - 1].close;
-
-    if (!metrics.price && !metrics.marketCap && !chart.length) {
-      const reasons = [chartResult, quoteResult, summaryResult]
-        .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
-        .map((r) => r.reason?.message ?? String(r.reason))
-        .join(' / ');
-      throw new Error(reasons || '데이터가 비어 있습니다.');
-    }
+    const { symbol, chart } = await resolveWorkingSymbol(query);
+    const raw = await fetchYahooSummary(symbol);
+    const metrics = raw ? pick(raw) : metricsFromChart(symbol, chart, query);
+    metrics.symbol = metrics.symbol || symbol;
+    if ((!metrics.name || metrics.name === 'Unknown') && query) metrics.name = query;
+    if (!metrics.price && chart.length) metrics.price = chart.at(-1)?.close ?? null;
+    if (!metrics.fiftyTwoWeekHigh && chart.length) metrics.fiftyTwoWeekHigh = Math.max(...chart.map((x) => x.close));
+    if (!metrics.fiftyTwoWeekLow && chart.length) metrics.fiftyTwoWeekLow = Math.min(...chart.map((x) => x.close));
 
     const scores = scoreFromMetrics(metrics);
-    const sources = [
-      chartResult.status === 'fulfilled' ? 'chart' : null,
-      quoteResult.status === 'fulfilled' ? 'quote' : null,
-      summaryResult.status === 'fulfilled' ? 'summary' : null
-    ].filter(Boolean).join(' + ');
-
-    return NextResponse.json({
-      query,
-      symbol,
-      metrics,
-      scores,
-      chart,
-      source: `Yahoo Finance public endpoint (${sources || 'fallback'})`,
-      warnings: [
-        summaryResult.status === 'rejected' ? 'Yahoo summary API가 막혀 일부 재무/섹터 정보가 비어 있을 수 있습니다.' : null,
-        quoteResult.status === 'rejected' ? 'Yahoo quote API가 막혀 일부 밸류에이션 정보가 비어 있을 수 있습니다.' : null
-      ].filter(Boolean)
-    });
+    const source = raw
+      ? 'Yahoo Finance public endpoint'
+      : 'Yahoo chart fallback. DART_API_KEY가 있으면 국내 종목명 검색을 보강합니다.';
+    return NextResponse.json({ query, symbol, metrics, scores, chart, source });
   } catch (e: any) {
     return NextResponse.json({
       error: e?.message ?? '데이터 조회 실패',
-      hint: 'Yahoo가 일부 API를 401로 막을 수 있습니다. AAPL/NVDA로 먼저 테스트하고, 한국 기업은 005930.KS처럼 입력하세요.'
+      hint: '국내 종목은 회사명, 6자리 코드, 005930.KS/KQ 형식 모두 지원합니다. 모든 종목명 검색은 Vercel 환경변수 DART_API_KEY 설정 후 더 정확해집니다.'
     }, { status: 500 });
   }
 }
