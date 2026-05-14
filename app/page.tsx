@@ -139,6 +139,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [visitStats, setVisitStats] = useState<VisitStats | null>(null);
 
   useEffect(() => {
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
@@ -151,6 +152,46 @@ export default function Home() {
     window.addEventListener('beforeinstallprompt', handler);
     return () => window.removeEventListener('beforeinstallprompt', handler);
   }, []);
+
+  useEffect(() => {
+  async function loadVisitStats() {
+    try {
+      const visitorStorageKey = 'company-diagnosis-visitor-id';
+      const sessionCountedKey = 'company-diagnosis-session-counted';
+
+      let visitorId = localStorage.getItem(visitorStorageKey);
+
+      if (!visitorId) {
+        visitorId =
+          typeof crypto !== 'undefined' && 'randomUUID' in crypto
+            ? crypto.randomUUID()
+            : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+        localStorage.setItem(visitorStorageKey, visitorId);
+      }
+
+      const alreadyCounted = sessionStorage.getItem(sessionCountedKey) === '1';
+
+      const res = await fetch('/api/visits', {
+        method: alreadyCounted ? 'GET' : 'POST',
+        headers: alreadyCounted ? undefined : { 'Content-Type': 'application/json' },
+        body: alreadyCounted ? undefined : JSON.stringify({ visitorId }),
+      });
+
+      const data = await res.json();
+
+      setVisitStats(data);
+
+      if (!alreadyCounted && data?.enabled) {
+        sessionStorage.setItem(sessionCountedKey, '1');
+      }
+    } catch {
+      setVisitStats(null);
+    }
+  }
+
+  loadVisitStats();
+}, []);
 
   async function analyze(nextQuery = query) {
     const trimmed = nextQuery.trim();
@@ -192,10 +233,19 @@ export default function Home() {
   const mainPe = m ? m.forwardPE ?? m.trailingPE : null;
 
   return (
-    <main className="app-shell">
+  <main className="app-shell">
+    <div className="top-status-bar">
       <div className="developer-credit">개발자 : 지모바</div>
-
-      <section className="hero">
+  
+      {visitStats?.enabled && (
+        <div className="visit-counter">
+          <span>총 방문 {visitStats.totalVisits?.toLocaleString() ?? 0}</span>
+          <span>방문자 {visitStats.uniqueVisitors?.toLocaleString() ?? 0}</span>
+        </div>
+      )}
+    </div>
+  
+    <section className="hero">
         <div className="eyebrow">모바일 PWA · 기업 진단</div>
         <h1>기업명만 입력하면 가치·성장·위험을 한 화면에</h1>
         <p>
@@ -492,7 +542,33 @@ export default function Home() {
           font-weight: 900;
           box-shadow: 0 6px 18px rgba(19, 35, 66, 0.06);
         }
-
+        .top-status-bar {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 10px;
+          margin-bottom: 12px;
+        }
+        
+        .visit-counter {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          flex-wrap: wrap;
+        }
+        
+        .visit-counter span {
+          display: inline-flex;
+          align-items: center;
+          padding: 8px 11px;
+          border: 1px solid #d9e3f0;
+          border-radius: 999px;
+          background: #ffffff;
+          color: #506785;
+          font-size: 12px;
+          font-weight: 900;
+          box-shadow: 0 6px 18px rgba(19, 35, 66, 0.05);
+        }
         .hero,
         .panel,
         .compact-panel,
@@ -879,7 +955,10 @@ export default function Home() {
           .app-shell {
             padding: 16px 10px 56px;
           }
-
+          .top-status-bar {
+            align-items: flex-start;
+            flex-direction: column;
+          }
           .developer-credit {
             margin-bottom: 10px;
             font-size: 12px;
