@@ -12,6 +12,7 @@ type VisitStats = {
   uniqueVisitors: number | null;
   message?: string;
 };
+
 type CompanyAnalysis = {
   headline: string;
   summary: string;
@@ -19,6 +20,18 @@ type CompanyAnalysis = {
   risks: string[];
   checklist: string[];
   disclaimer: string;
+};
+
+type NewsItem = {
+  title: string;
+  description: string;
+  link: string;
+  pubDate: string;
+};
+
+type NewsResponse = {
+  items: NewsItem[];
+  warning?: string;
 };
 
 type PeerRecommendation = {
@@ -84,6 +97,17 @@ function fmtRatio(n?: number | null, digits = 2) {
   return `${n.toFixed(digits)}배`;
 }
 
+function formatNewsDate(value: string) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString('ko-KR', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
+}
+
 function Metric({ label, value, desc }: { label: string; value: string; desc: string }) {
   return (
     <div className="metric-card">
@@ -141,6 +165,10 @@ export default function Home() {
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [visitStats, setVisitStats] = useState<VisitStats | null>(null);
 
+  const [news, setNews] = useState<NewsItem[]>([]);
+  const [newsLoading, setNewsLoading] = useState(false);
+  const [newsWarning, setNewsWarning] = useState('');
+
   useEffect(() => {
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 
@@ -154,44 +182,70 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-  async function loadVisitStats() {
+    async function loadVisitStats() {
+      try {
+        const visitorStorageKey = 'company-diagnosis-visitor-id';
+        const sessionCountedKey = 'company-diagnosis-session-counted';
+
+        let visitorId = localStorage.getItem(visitorStorageKey);
+
+        if (!visitorId) {
+          visitorId =
+            typeof crypto !== 'undefined' && 'randomUUID' in crypto
+              ? crypto.randomUUID()
+              : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+          localStorage.setItem(visitorStorageKey, visitorId);
+        }
+
+        const alreadyCounted = sessionStorage.getItem(sessionCountedKey) === '1';
+
+        const res = await fetch('/api/visits', {
+          method: alreadyCounted ? 'GET' : 'POST',
+          headers: alreadyCounted ? undefined : { 'Content-Type': 'application/json' },
+          body: alreadyCounted ? undefined : JSON.stringify({ visitorId }),
+        });
+
+        const data = await res.json();
+
+        setVisitStats(data);
+
+        if (!alreadyCounted && data?.enabled) {
+          sessionStorage.setItem(sessionCountedKey, '1');
+        }
+      } catch {
+        setVisitStats(null);
+      }
+    }
+
+    loadVisitStats();
+  }, []);
+
+  async function loadNews(newsQuery: string) {
+    const trimmed = newsQuery.trim();
+
+    if (!trimmed) {
+      setNews([]);
+      setNewsWarning('');
+      return;
+    }
+
+    setNewsLoading(true);
+    setNewsWarning('');
+
     try {
-      const visitorStorageKey = 'company-diagnosis-visitor-id';
-      const sessionCountedKey = 'company-diagnosis-session-counted';
+      const res = await fetch(`/api/news?query=${encodeURIComponent(trimmed)}`);
+      const data: NewsResponse = await res.json();
 
-      let visitorId = localStorage.getItem(visitorStorageKey);
-
-      if (!visitorId) {
-        visitorId =
-          typeof crypto !== 'undefined' && 'randomUUID' in crypto
-            ? crypto.randomUUID()
-            : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-
-        localStorage.setItem(visitorStorageKey, visitorId);
-      }
-
-      const alreadyCounted = sessionStorage.getItem(sessionCountedKey) === '1';
-
-      const res = await fetch('/api/visits', {
-        method: alreadyCounted ? 'GET' : 'POST',
-        headers: alreadyCounted ? undefined : { 'Content-Type': 'application/json' },
-        body: alreadyCounted ? undefined : JSON.stringify({ visitorId }),
-      });
-
-      const data = await res.json();
-
-      setVisitStats(data);
-
-      if (!alreadyCounted && data?.enabled) {
-        sessionStorage.setItem(sessionCountedKey, '1');
-      }
+      setNews(data.items ?? []);
+      setNewsWarning(data.warning ?? '');
     } catch {
-      setVisitStats(null);
+      setNews([]);
+      setNewsWarning('뉴스를 불러오지 못했습니다.');
+    } finally {
+      setNewsLoading(false);
     }
   }
-
-  loadVisitStats();
-}, []);
 
   async function analyze(nextQuery = query) {
     const trimmed = nextQuery.trim();
@@ -204,6 +258,9 @@ export default function Home() {
     setLoading(true);
     setError('');
     setResult(null);
+    setNews([]);
+    setNewsWarning('');
+    setNewsLoading(false);
 
     try {
       const res = await fetch('/api/analyze', {
@@ -219,6 +276,7 @@ export default function Home() {
       }
 
       setResult(data);
+      loadNews(data?.metrics?.name || data?.query || trimmed);
     } catch (event: any) {
       setError(event.message ?? '조회 실패');
     } finally {
@@ -233,19 +291,19 @@ export default function Home() {
   const mainPe = m ? m.forwardPE ?? m.trailingPE : null;
 
   return (
-  <main className="app-shell">
-    <div className="top-status-bar">
-      <div className="developer-credit">개발자 : 지모바</div>
-  
-      {visitStats?.enabled && (
-        <div className="visit-counter">
-          <span>총 방문 {visitStats.totalVisits?.toLocaleString() ?? 0}</span>
-          <span>방문자 {visitStats.uniqueVisitors?.toLocaleString() ?? 0}</span>
-        </div>
-      )}
-    </div>
-  
-    <section className="hero">
+    <main className="app-shell">
+      <div className="top-status-bar">
+        <div className="developer-credit">개발자 : 지모바</div>
+
+        {visitStats?.enabled && (
+          <div className="visit-counter">
+            <span>총 방문 {visitStats.totalVisits?.toLocaleString() ?? 0}</span>
+            <span>방문자 {visitStats.uniqueVisitors?.toLocaleString() ?? 0}</span>
+          </div>
+        )}
+      </div>
+
+      <section className="hero">
         <div className="eyebrow">모바일 PWA · 기업 진단</div>
         <h1>기업명만 입력하면 가치·성장·위험을 한 화면에</h1>
         <p>
@@ -278,32 +336,34 @@ export default function Home() {
           ))}
         </div>
       </section>
+
       {!result && !loading && !error && (
-  <section className="panel intro-notice">
-    <div className="notice-badge">안내</div>
+        <section className="panel intro-notice">
+          <div className="notice-badge">안내</div>
 
-    <h2>기업진단 서비스는 현재 개발 중입니다</h2>
+          <h2>기업진단 서비스는 현재 개발 중입니다</h2>
 
-    <p>
-      이 앱은 공개 데이터와 자동 계산 로직을 기반으로 기업의 가치, 성장 가능성,
-      버블 위험, 섹터 관련 종목을 참고용으로 보여주는 모바일 PWA입니다.
-    </p>
+          <p>
+            이 앱은 공개 데이터와 자동 계산 로직을 기반으로 기업의 가치, 성장 가능성,
+            버블 위험, 섹터 관련 종목을 참고용으로 보여주는 모바일 PWA입니다.
+          </p>
 
-    <div className="intro-warning">
-      <strong>투자 유의사항</strong>
-      <p>
-        본 서비스의 분석 결과, 점수, 차트, 추천/관심주 순위는 투자 참고용 정보이며
-        특정 종목의 매수·매도·보유를 권유하지 않습니다. 데이터는 지연되거나 부정확할 수 있고,
-        모든 투자 판단과 책임은 이용자 본인에게 있습니다.
-      </p>
-    </div>
+          <div className="intro-warning">
+            <strong>투자 유의사항</strong>
+            <p>
+              본 서비스의 분석 결과, 점수, 차트, 추천/관심주 순위는 투자 참고용 정보이며
+              특정 종목의 매수·매도·보유를 권유하지 않습니다. 데이터는 지연되거나 부정확할 수 있고,
+              모든 투자 판단과 책임은 이용자 본인에게 있습니다.
+            </p>
+          </div>
 
-    <div className="intro-guide">
-      <span>예시 입력</span>
-      <p>삼성전자, 하나금융지주, 두산에너빌리티, NVDA, AAPL처럼 입력해 보세요.</p>
-    </div>
-  </section>
-)}
+          <div className="intro-guide">
+            <span>예시 입력</span>
+            <p>삼성전자, 하나금융지주, 두산에너빌리티, NVDA, AAPL처럼 입력해 보세요.</p>
+          </div>
+        </section>
+      )}
+
       {deferredPrompt && (
         <section className="notice compact-panel">
           <div>
@@ -430,8 +490,16 @@ export default function Home() {
             </div>
 
             <div className="stress-grid">
-              <Metric label="중간 스트레스" value={fmtNumber(s.stress?.moderate, currency)} desc="위험 점수 기반 가상 하락 가격" />
-              <Metric label="강한 스트레스" value={fmtNumber(s.stress?.severe, currency)} desc="PER/PBR 정상화와 52주 저점 반영" />
+              <Metric
+                label="중간 스트레스"
+                value={fmtNumber(s.stress?.moderate, currency)}
+                desc="위험 점수 기반 가상 하락 가격"
+              />
+              <Metric
+                label="강한 스트레스"
+                value={fmtNumber(s.stress?.severe, currency)}
+                desc="PER/PBR 정상화와 52주 저점 반영"
+              />
             </div>
 
             <p className="muted">
@@ -464,6 +532,42 @@ export default function Home() {
               </>
             ) : (
               <p>분석 문장 데이터가 없습니다.</p>
+            )}
+          </section>
+
+          <section className="panel news-panel">
+            <div className="section-head">
+              <div>
+                <div className="eyebrow">뉴스</div>
+                <h2>최신 관련 뉴스</h2>
+              </div>
+              <span className="section-note">네이버 뉴스 검색 기준</span>
+            </div>
+
+            {newsLoading && <p className="muted">뉴스를 불러오는 중입니다.</p>}
+
+            {!newsLoading && newsWarning && <p className="muted">{newsWarning}</p>}
+
+            {!newsLoading && !newsWarning && news.length === 0 && (
+              <p className="muted">표시할 최신 뉴스가 없습니다.</p>
+            )}
+
+            {!newsLoading && news.length > 0 && (
+              <div className="news-list">
+                {news.map((item) => (
+                  <a
+                    className="news-card"
+                    key={`${item.link}-${item.pubDate}`}
+                    href={item.link}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <strong>{item.title}</strong>
+                    <p>{item.description}</p>
+                    {item.pubDate && <span>{formatNewsDate(item.pubDate)}</span>}
+                  </a>
+                ))}
+              </div>
             )}
           </section>
 
@@ -554,10 +658,17 @@ export default function Home() {
           background: #f6f8fb;
         }
 
+        .top-status-bar {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 10px;
+          margin-bottom: 12px;
+        }
+
         .developer-credit {
           display: inline-flex;
           align-items: center;
-          margin-bottom: 12px;
           padding: 8px 12px;
           border: 1px solid #d9e3f0;
           border-radius: 999px;
@@ -567,21 +678,14 @@ export default function Home() {
           font-weight: 900;
           box-shadow: 0 6px 18px rgba(19, 35, 66, 0.06);
         }
-        .top-status-bar {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 10px;
-          margin-bottom: 12px;
-        }
-        
+
         .visit-counter {
           display: inline-flex;
           align-items: center;
           gap: 6px;
           flex-wrap: wrap;
         }
-        
+
         .visit-counter span {
           display: inline-flex;
           align-items: center;
@@ -594,76 +698,78 @@ export default function Home() {
           font-weight: 900;
           box-shadow: 0 6px 18px rgba(19, 35, 66, 0.05);
         }
+
         .intro-notice {
-  background: linear-gradient(135deg, #ffffff, #f7faff);
-}
+          background: linear-gradient(135deg, #ffffff, #f7faff);
+        }
 
-.notice-badge {
-  display: inline-flex;
-  align-items: center;
-  margin-bottom: 12px;
-  padding: 7px 11px;
-  border-radius: 999px;
-  background: #eef3f8;
-  color: #506785;
-  font-size: 12px;
-  font-weight: 900;
-}
+        .notice-badge {
+          display: inline-flex;
+          align-items: center;
+          margin-bottom: 12px;
+          padding: 7px 11px;
+          border-radius: 999px;
+          background: #eef3f8;
+          color: #506785;
+          font-size: 12px;
+          font-weight: 900;
+        }
 
-.intro-notice h2 {
-  font-size: 24px;
-  letter-spacing: -0.035em;
-}
+        .intro-notice h2 {
+          font-size: 24px;
+          letter-spacing: -0.035em;
+        }
 
-.intro-notice > p {
-  margin-top: 10px;
-  max-width: 760px;
-  color: #66758b;
-  line-height: 1.7;
-}
+        .intro-notice > p {
+          margin-top: 10px;
+          max-width: 760px;
+          color: #66758b;
+          line-height: 1.7;
+        }
 
-.intro-warning {
-  margin-top: 16px;
-  padding: 16px;
-  border: 1px solid #ffe0c2;
-  border-radius: 18px;
-  background: #fffaf4;
-}
+        .intro-warning {
+          margin-top: 16px;
+          padding: 16px;
+          border: 1px solid #ffe0c2;
+          border-radius: 18px;
+          background: #fffaf4;
+        }
 
-.intro-warning strong {
-  display: block;
-  margin-bottom: 6px;
-  color: #9a4f00;
-  font-size: 15px;
-}
+        .intro-warning strong {
+          display: block;
+          margin-bottom: 6px;
+          color: #9a4f00;
+          font-size: 15px;
+        }
 
-.intro-warning p {
-  margin: 0;
-  color: #66513b;
-  line-height: 1.65;
-}
+        .intro-warning p {
+          margin: 0;
+          color: #66513b;
+          line-height: 1.65;
+        }
 
-.intro-guide {
-  margin-top: 14px;
-  padding: 14px 16px;
-  border: 1px solid #e1e7f0;
-  border-radius: 18px;
-  background: #fbfcff;
-}
+        .intro-guide {
+          margin-top: 14px;
+          padding: 14px 16px;
+          border: 1px solid #e1e7f0;
+          border-radius: 18px;
+          background: #fbfcff;
+        }
 
-.intro-guide span {
-  display: block;
-  margin-bottom: 4px;
-  color: #506785;
-  font-size: 13px;
-  font-weight: 900;
-}
+        .intro-guide span {
+          display: block;
+          margin-bottom: 4px;
+          color: #506785;
+          font-size: 13px;
+          font-weight: 900;
+        }
 
-.intro-guide p {
-  margin: 0;
-  color: #66758b;
-  line-height: 1.6;
-}
+        .intro-guide p {
+          margin: 0;
+          color: #66758b;
+          line-height: 1.6;
+        }
+
         .hero,
         .panel,
         .compact-panel,
@@ -974,6 +1080,50 @@ export default function Home() {
           font-size: 13px;
         }
 
+        .news-list {
+          display: grid;
+          gap: 10px;
+          margin-top: 16px;
+        }
+
+        .news-card {
+          display: block;
+          padding: 16px;
+          border: 1px solid #e4eaf2;
+          border-radius: 18px;
+          background: #fbfcff;
+          color: inherit;
+          text-decoration: none;
+          transition: transform 0.15s ease, box-shadow 0.15s ease;
+        }
+
+        .news-card:hover {
+          transform: translateY(-1px);
+          box-shadow: 0 8px 22px rgba(19, 35, 66, 0.08);
+        }
+
+        .news-card strong {
+          display: block;
+          color: #172033;
+          font-size: 16px;
+          line-height: 1.45;
+          letter-spacing: -0.02em;
+        }
+
+        .news-card p {
+          margin-top: 7px;
+          color: #66758b;
+          line-height: 1.55;
+        }
+
+        .news-card span {
+          display: block;
+          margin-top: 9px;
+          color: #8a97aa;
+          font-size: 12px;
+          font-weight: 800;
+        }
+
         .peer-list {
           display: grid;
           gap: 12px;
@@ -1050,12 +1200,13 @@ export default function Home() {
           .app-shell {
             padding: 16px 10px 56px;
           }
+
           .top-status-bar {
             align-items: flex-start;
             flex-direction: column;
           }
+
           .developer-credit {
-            margin-bottom: 10px;
             font-size: 12px;
           }
 
@@ -1099,7 +1250,8 @@ export default function Home() {
           .term-card,
           .list-box,
           .analysis-summary,
-          .peer-card {
+          .peer-card,
+          .news-card {
             border-radius: 16px;
           }
 
