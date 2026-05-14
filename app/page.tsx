@@ -278,7 +278,32 @@ export default function Home() {
           ))}
         </div>
       </section>
+      {!result && !loading && !error && (
+  <section className="panel intro-notice">
+    <div className="notice-badge">안내</div>
 
+    <h2>기업진단 서비스는 현재 개발 중입니다</h2>
+
+    <p>
+      이 앱은 공개 데이터와 자동 계산 로직을 기반으로 기업의 가치, 성장 가능성,
+      버블 위험, 섹터 관련 종목을 참고용으로 보여주는 모바일 PWA입니다.
+    </p>
+
+    <div className="intro-warning">
+      <strong>투자 유의사항</strong>
+      <p>
+        본 서비스의 분석 결과, 점수, 차트, 추천/관심주 순위는 투자 참고용 정보이며
+        특정 종목의 매수·매도·보유를 권유하지 않습니다. 데이터는 지연되거나 부정확할 수 있고,
+        모든 투자 판단과 책임은 이용자 본인에게 있습니다.
+      </p>
+    </div>
+
+    <div className="intro-guide">
+      <span>예시 입력</span>
+      <p>삼성전자, 하나금융지주, 두산에너빌리티, NVDA, AAPL처럼 입력해 보세요.</p>
+    </div>
+  </section>
+)}
       {deferredPrompt && (
         <section className="notice compact-panel">
           <div>
