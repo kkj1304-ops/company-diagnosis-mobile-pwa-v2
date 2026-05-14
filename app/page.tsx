@@ -594,6 +594,76 @@ export default function Home() {
           font-weight: 900;
           box-shadow: 0 6px 18px rgba(19, 35, 66, 0.05);
         }
+        .intro-notice {
+  background: linear-gradient(135deg, #ffffff, #f7faff);
+}
+
+.notice-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-bottom: 12px;
+  padding: 7px 11px;
+  border-radius: 999px;
+  background: #eef3f8;
+  color: #506785;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.intro-notice h2 {
+  font-size: 24px;
+  letter-spacing: -0.035em;
+}
+
+.intro-notice > p {
+  margin-top: 10px;
+  max-width: 760px;
+  color: #66758b;
+  line-height: 1.7;
+}
+
+.intro-warning {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid #ffe0c2;
+  border-radius: 18px;
+  background: #fffaf4;
+}
+
+.intro-warning strong {
+  display: block;
+  margin-bottom: 6px;
+  color: #9a4f00;
+  font-size: 15px;
+}
+
+.intro-warning p {
+  margin: 0;
+  color: #66513b;
+  line-height: 1.65;
+}
+
+.intro-guide {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px solid #e1e7f0;
+  border-radius: 18px;
+  background: #fbfcff;
+}
+
+.intro-guide span {
+  display: block;
+  margin-bottom: 4px;
+  color: #506785;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.intro-guide p {
+  margin: 0;
+  color: #66758b;
+  line-height: 1.6;
+}
         .hero,
         .panel,
         .compact-panel,
