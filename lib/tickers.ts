@@ -23,6 +23,9 @@ export const tickerMap: Record<string, string> = {
   '한화에어로스페이스': '012450.KS',
   'HD현대중공업': '329180.KS',
   '삼성물산': '028260.KS',
+  '두산에너빌리티': '034020.KS',
+  '두산중공업': '034020.KS',
+  '두산에너': '034020.KS',
   '에코프로비엠': '247540.KQ',
   '에코프로': '086520.KQ',
   '알테오젠': '196170.KQ',
@@ -32,13 +35,32 @@ export const tickerMap: Record<string, string> = {
   'SM': '041510.KQ'
 };
 
-export function normalizeTicker(input: string): string {
+export function normalizeName(input: string): string {
+  return input
+    .trim()
+    .replace(/\s+/g, '')
+    .replace(/[()（）.,·ㆍ]/g, '')
+    .toUpperCase();
+}
+
+const normalizedTickerMap: Record<string, string> = Object.fromEntries(
+  Object.entries(tickerMap).map(([name, symbol]) => [normalizeName(name), symbol])
+);
+
+export function candidatesFromInput(input: string): string[] {
   const trimmed = input.trim();
-  if (!trimmed) return '';
-  if (tickerMap[trimmed]) return tickerMap[trimmed];
-  const upper = trimmed.toUpperCase();
-  if (tickerMap[upper]) return tickerMap[upper];
-  if (/^\d{6}$/.test(trimmed)) return `${trimmed}.KS`;
-  if (/^\d{6}\.(KS|KQ)$/i.test(trimmed)) return trimmed.toUpperCase();
-  return upper;
+  if (!trimmed) return [];
+
+  const normalized = normalizeName(trimmed);
+  const mapped = tickerMap[trimmed] ?? tickerMap[trimmed.toUpperCase()] ?? normalizedTickerMap[normalized];
+  if (mapped) return [mapped];
+
+  if (/^\d{6}$/.test(trimmed)) return [`${trimmed}.KS`, `${trimmed}.KQ`];
+  if (/^\d{6}\.(KS|KQ)$/i.test(trimmed)) return [trimmed.toUpperCase()];
+
+  return [trimmed.toUpperCase()];
+}
+
+export function normalizeTicker(input: string): string {
+  return candidatesFromInput(input)[0] ?? '';
 }
