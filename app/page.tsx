@@ -6,6 +6,12 @@ import { fmtNumber, fmtPct } from '@/lib/scoring';
 
 type ChartPoint = { date: string; close: number };
 
+type VisitStats = {
+  enabled: boolean;
+  totalVisits: number | null;
+  uniqueVisitors: number | null;
+  message?: string;
+
 type CompanyAnalysis = {
   headline: string;
   summary: string;
